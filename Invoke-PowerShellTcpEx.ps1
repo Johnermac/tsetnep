@@ -84,4 +84,4 @@ function Power
     }
 }
 
-Power -Reverse -IPAddress 192.168.0.11 -Port 443
+Power -Reverse -IPAddress 192.168.0.11 -Port 8443
