@@ -1,29 +1,30 @@
+# Output file
+$outputFile = "automation_accounts.csv"
+"SubscriptionName,AutomationAccountName,ResourceGroupName,IdentityType" | Out-File -FilePath $outputFile -Encoding utf8
+
 # Get all subscriptions
-subscriptions=$(az account list --query "[].id" -o tsv)
+$subscriptions = az account list --query "[].id" -o tsv
 
-# Initialize an empty output file
-output_file="automation_accounts.csv"
-echo "SubscriptionName,AutomationAccountName,ResourceGroupName,IdentityType" > $output_file
+foreach ($subscription in $subscriptions -split "`n") {
+    Write-Host "Processing subscription: $subscription" -ForegroundColor Cyan
 
-# Loop through each subscription
-for subscription in $subscriptions; do
-  echo "Processing subscription: $subscription"
-  
-  # Set the subscription context
-  az account set --subscription $subscription
-  
-  # Get all automation accounts in the subscription
-  accounts=$(az automation account list --query "[].{Name:name,ResourceGroup:resourceGroup,IdentityType:identity.type}" -o json)
+    # Set subscription context
+    az account set --subscription $subscription
 
-  # Process each automation account
-  for account in $(echo "$accounts" | jq -c '.[]'); do
-    name=$(echo "$account" | jq -r '.Name')
-    resourceGroup=$(echo "$account" | jq -r '.ResourceGroup')
-    identityType=$(echo "$account" | jq -r '.IdentityType')
+    # Get subscription name for output
+    $subscriptionName = az account show --query "name" -o tsv
 
-    # Write the results to the CSV file
-    echo "$(az account show --query 'name' -o tsv),$name,$resourceGroup,$identityType" >> $output_file
-  done
-done
+    # Get all automation accounts in the subscription
+    $accounts = az automation account list --query "[].{Name:name,ResourceGroup:resourceGroup,IdentityType:identity.type}" -o json | ConvertFrom-Json
 
-echo "Results saved to $output_file"
+    foreach ($account in $accounts) {
+        $name = $account.Name
+        $resourceGroup = $account.ResourceGroup
+        $identityType = if ($account.IdentityType) { $account.IdentityType } else { "None" }
+
+        # Write to CSV
+        "$subscriptionName,$name,$resourceGroup,$identityType" | Out-File -Append -FilePath $outputFile -Encoding utf8
+    }
+}
+
+Write-Host "Results saved to $outputFile" -ForegroundColor Green
