@@ -68,3 +68,89 @@ foreach ($subscription in $subscriptions) {
 }
 
 Write-Host "Results saved to $outputFile" -ForegroundColor Green
+
+
+#policycheck
+# Log in to Azure
+Connect-AzAccount
+
+# Get all subscriptions
+$subscriptions = Get-AzSubscription
+
+# Create an array to store results
+$policyResults = @()
+
+foreach ($subscription in $subscriptions) {
+    Set-AzContext -SubscriptionId $subscription.Id
+
+    Write-Host "Processing Subscription: $($subscription.Name)"
+
+    # Get all Policy Assignments in the subscription
+    $policyAssignments = Get-AzPolicyAssignment
+
+    foreach ($policyAssignment in $policyAssignments) {
+        Write-Host "  Processing Policy Assignment: $($policyAssignment.Name)"
+
+        # Get the policy definition details
+        $policyDefinition = Get-AzPolicyDefinition -PolicyDefinitionId $policyAssignment.PolicyDefinitionId
+
+        # Check if the policy is enforcing secure configurations like MFA, encryption
+        $isRelevantPolicy = $policyDefinition.Properties.DisplayName -match "MFA|encryption|secure|compliant"
+
+        if ($isRelevantPolicy) {
+            $policyResults += [PSCustomObject]@{
+                Subscription        = $subscription.Name
+                PolicyAssignment    = $policyAssignment.Name
+                PolicyDisplayName   = $policyDefinition.Properties.DisplayName
+                Scope               = $policyAssignment.Scope
+                EnforcementMode     = $policyAssignment.EnforcementMode
+            }
+        }
+    }
+}
+
+# Output the results
+$policyResults | Format-Table -AutoSize
+
+
+#non-compliant
+# Log in to Azure
+Connect-AzAccount
+
+# Get all subscriptions
+$subscriptions = Get-AzSubscription
+
+# Create an array to store compliance results
+$complianceResults = @()
+
+foreach ($subscription in $subscriptions) {
+    Set-AzContext -SubscriptionId $subscription.Id
+
+    Write-Host "Processing Subscription: $($subscription.Name)"
+
+    # Get all Policy Assignments in the subscription
+    $policyAssignments = Get-AzPolicyAssignment
+
+    foreach ($policyAssignment in $policyAssignments) {
+        Write-Host "  Processing Policy Assignment: $($policyAssignment.Name)"
+
+        # Get compliance status for the policy assignment
+        $compliance = Get-AzPolicyState -PolicyAssignmentId $policyAssignment.PolicyAssignmentId
+
+        foreach ($state in $compliance) {
+            if ($state.ComplianceState -ne "Compliant") {
+                $complianceResults += [PSCustomObject]@{
+                    Subscription      = $subscription.Name
+                    PolicyAssignment  = $policyAssignment.Name
+                    ResourceId        = $state.ResourceId
+                    ComplianceState   = $state.ComplianceState
+                }
+            }
+        }
+    }
+}
+
+# Output the results
+$complianceResults | Format-Table -AutoSize
+
+
