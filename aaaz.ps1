@@ -114,8 +114,36 @@ $policyResults | Format-Table -AutoSize
 
 
 #non-compliant
-# Log in to Azure
-Connect-AzAccount
+# Function to check and renew the token if necessary
+function Check-Token {
+    try {
+        Get-AzContext | Out-Null
+    } catch {
+        Write-Host "Token expired or invalid. Renewing token..."
+        Connect-AzAccount -UseDeviceAuthentication | Out-Null
+        Write-Host "Token renewed successfully. Continuing..."
+    }
+}
+
+# Function to execute actions with retry logic
+function Execute-WithRetry {
+    param (
+        [ScriptBlock]$Action,
+        [int]$MaxRetries = 3
+    )
+    $retryCount = 0
+    while ($retryCount -lt $MaxRetries) {
+        try {
+            & $Action
+            return
+        } catch {
+            $retryCount++
+            Write-Warning "Error encountered: $_. Attempt $retryCount of $MaxRetries..."
+            Start-Sleep -Seconds 5 # Wait before retrying
+        }
+    }
+    Write-Error "Operation failed after $MaxRetries attempts."
+}
 
 # Get all subscriptions
 $subscriptions = Get-AzSubscription
@@ -124,26 +152,32 @@ $subscriptions = Get-AzSubscription
 $complianceResults = @()
 
 foreach ($subscription in $subscriptions) {
-    Set-AzContext -SubscriptionId $subscription.Id
+    Check-Token
+
+    Execute-WithRetry -Action {
+        Set-AzContext -SubscriptionId $subscription.Id
+    }
 
     Write-Host "Processing Subscription: $($subscription.Name)"
 
-    # Get all Policy Assignments in the subscription
-    $policyAssignments = Get-AzPolicyAssignment
+    Execute-WithRetry -Action {
+        # Get all Policy Assignments in the subscription
+        $policyAssignments = Get-AzPolicyAssignment
 
-    foreach ($policyAssignment in $policyAssignments) {
-        Write-Host "  Processing Policy Assignment: $($policyAssignment.Name)"
+        foreach ($policyAssignment in $policyAssignments) {
+            Write-Host "  Processing Policy Assignment: $($policyAssignment.Name)"
 
-        # Get compliance status for the policy assignment
-        $compliance = Get-AzPolicyState -PolicyAssignmentId $policyAssignment.PolicyAssignmentId
+            # Get compliance status for the policy assignment
+            $compliance = Get-AzPolicyState -PolicyAssignmentId $policyAssignment.PolicyAssignmentId
 
-        foreach ($state in $compliance) {
-            if ($state.ComplianceState -ne "Compliant") {
-                $complianceResults += [PSCustomObject]@{
-                    Subscription      = $subscription.Name
-                    PolicyAssignment  = $policyAssignment.Name
-                    ResourceId        = $state.ResourceId
-                    ComplianceState   = $state.ComplianceState
+            foreach ($state in $compliance) {
+                if ($state.ComplianceState -ne "Compliant") {
+                    $complianceResults += [PSCustomObject]@{
+                        Subscription      = $subscription.Name
+                        PolicyAssignment  = $policyAssignment.Name
+                        ResourceId        = $state.ResourceId
+                        ComplianceState   = $state.ComplianceState
+                    }
                 }
             }
         }
@@ -153,4 +187,6 @@ foreach ($subscription in $subscriptions) {
 # Output the results
 $complianceResults | Format-Table -AutoSize
 
+# Optional: Export results to CSV
+$complianceResults | Export-Csv -Path "NonCompliantPolicies.csv" -NoTypeInformation
 
