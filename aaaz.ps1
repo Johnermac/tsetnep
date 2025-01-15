@@ -194,7 +194,7 @@ $complianceResults | Export-Csv -Path "NonCompliantPolicies.csv" -NoTypeInformat
 #---------------
 
 # Authenticate and list all subscriptions
-$subscriptions = Get-AzSubscription | ? {$_.State -eq 'Enabled' }
+$subscriptions = Get-AzSubscription | ? {$_.State -eq "Enabled"}
 
 # Array to store results
 $results = @()
@@ -206,41 +206,47 @@ foreach ($subscription in $subscriptions) {
     # Get all Automation Accounts in the subscription
     $automationAccounts = Get-AzAutomationAccount
     foreach ($automationAccount in $automationAccounts) {
-        Write-Host "  Automation Account: $($automationAccount.Name)" -ForegroundColor Green
+        Write-Host "  Automation Account: $($automationAccount.AutomationAccountName)" -ForegroundColor Yellow
 
         # Check for System-Assigned Managed Identity
         $systemIdentityPrincipalId = $automationAccount.Identity.PrincipalId
         if ($systemIdentityPrincipalId) {
-            Write-Host "    System-Assigned Identity: $systemIdentityPrincipalId" -ForegroundColor Yellow
+            Write-Host "    System-Assigned Identity: $systemIdentityPrincipalId" -ForegroundColor Green
             $results += [PSCustomObject]@{
-                SubscriptionName = $subscription.Name
-                AutomationAccountName = $automationAccount.Name
-                IdentityType = "System-Assigned"
-                PrincipalId = $systemIdentityPrincipalId
+                SubscriptionName       = $subscription.Name
+                AutomationAccountName  = $automationAccount.AutomationAccountName
+                IdentityType           = "System-Assigned"
+                PrincipalId            = $systemIdentityPrincipalId
+                RunbookName            = $null
+                RoleDefinitionName     = $null
+                RoleScope              = $null
             }
         }
 
         # Check for User-Assigned Managed Identities
         $userAssignedIdentities = $automationAccount.Identity.UserAssignedIdentities.Keys
         foreach ($userAssignedIdentity in $userAssignedIdentities) {
-            Write-Host "    User-Assigned Identity: $userAssignedIdentity" -ForegroundColor Orange
+            Write-Host "    User-Assigned Identity: $userAssignedIdentity" -ForegroundColor Green
             $userAssignedIdentityDetails = Get-AzUserAssignedIdentity -ResourceId $userAssignedIdentity
             $results += [PSCustomObject]@{
-                SubscriptionName = $subscription.Name
-                AutomationAccountName = $automationAccount.Name
-                IdentityType = "User-Assigned"
-                PrincipalId = $userAssignedIdentityDetails.PrincipalId
+                SubscriptionName       = $subscription.Name
+                AutomationAccountName  = $automationAccount.AutomationAccountName
+                IdentityType           = "User-Assigned"
+                PrincipalId            = $userAssignedIdentityDetails.PrincipalId
+                RunbookName            = $null
+                RoleDefinitionName     = $null
+                RoleScope              = $null
             }
         }
 
         # List all Runbooks in the Automation Account
-        $runbooks = Get-AzAutomationRunbook -AutomationAccountName $automationAccount.Name -ResourceGroupName $automationAccount.ResourceGroupName
+        $runbooks = Get-AzAutomationRunbook -AutomationAccountName $automationAccount.AutomationAccountName -ResourceGroupName $automationAccount.ResourceGroupName
         foreach ($runbook in $runbooks) {
-            Write-Host "    Runbook: $($runbook.Name)"
+            Write-Host "    Runbook: $($runbook.Name)" -ForegroundColor Magenta
 
             # Add Runbook information for each identity
-            foreach ($identity in $results | Where-Object { $_.AutomationAccountName -eq $automationAccount.Name }) {
-                $identity | Add-Member -NotePropertyName RunbookName -NotePropertyValue $runbook.Name -Force
+            foreach ($identity in $results | Where-Object { $_.AutomationAccountName -eq $automationAccount.AutomationAccountName }) {
+                $identity.RunbookName = $runbook.Name
             }
         }
     }
@@ -249,16 +255,17 @@ foreach ($subscription in $subscriptions) {
 # Retrieve Role Assignments for each Managed Identity
 foreach ($identity in $results) {
     if ($identity.PrincipalId) {
+        Write-Host "  Checking roles for PrincipalId: $($identity.PrincipalId)" -ForegroundColor Blue
         $roleAssignments = Get-AzRoleAssignment -ObjectId $identity.PrincipalId
         foreach ($roleAssignment in $roleAssignments) {
             $results += [PSCustomObject]@{
                 SubscriptionName       = $identity.SubscriptionName
                 AutomationAccountName  = $identity.AutomationAccountName
-                RunbookName            = $identity.RunbookName
                 IdentityType           = $identity.IdentityType
                 PrincipalId            = $identity.PrincipalId
+                RunbookName            = $identity.RunbookName
                 RoleDefinitionName     = $roleAssignment.RoleDefinitionName
-                Scope                  = $roleAssignment.Scope
+                RoleScope              = $roleAssignment.Scope
             }
         }
     }
@@ -269,5 +276,6 @@ $results | Format-Table -AutoSize
 
 # Save results to a CSV file for further review
 $results | Export-Csv -Path "ManagedIdentities_RoleAssignments.csv" -NoTypeInformation
+
 
 
