@@ -225,9 +225,15 @@ foreach ($subscription in $subscriptions) {
 
         # Check for User-Assigned Managed Identities
         $userAssignedIdentities = $automationAccount.Identity.UserAssignedIdentities.Keys
-        foreach ($userAssignedIdentity in $userAssignedIdentities) {
-            Write-Host "    User-Assigned Identity: $userAssignedIdentity" -ForegroundColor Green
-            $userAssignedIdentityDetails = Get-AzUserAssignedIdentity -ResourceId $userAssignedIdentity
+        foreach ($userAssignedIdentityId in $userAssignedIdentities) {
+            Write-Host "    User-Assigned Identity: $userAssignedIdentityId" -ForegroundColor Green
+
+            # Extract ResourceGroupName and Name from the User-Assigned Identity ResourceId
+            $resourceParts = $userAssignedIdentityId -split "/"
+            $resourceGroupName = $resourceParts[-5]
+            $identityName = $resourceParts[-1]
+
+            $userAssignedIdentityDetails = Get-AzUserAssignedIdentity -ResourceGroupName $resourceGroupName -Name $identityName
             $results += [PSCustomObject]@{
                 SubscriptionName       = $subscription.Name
                 AutomationAccountName  = $automationAccount.AutomationAccountName
@@ -244,9 +250,11 @@ foreach ($subscription in $subscriptions) {
         foreach ($runbook in $runbooks) {
             Write-Host "    Runbook: $($runbook.Name)" -ForegroundColor Magenta
 
-            # Add Runbook information for each identity
+            # Associate Runbook information with each identity
             foreach ($identity in $results | Where-Object { $_.AutomationAccountName -eq $automationAccount.AutomationAccountName }) {
-                $identity.RunbookName = $runbook.Name
+                if (-not $identity.RunbookName) {
+                    $identity.RunbookName = $runbook.Name
+                }
             }
         }
     }
