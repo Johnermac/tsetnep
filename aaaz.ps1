@@ -1,4 +1,4 @@
-### public storage accounts 
+## public storage accounts 
 
 # Path to the text file containing the list of subscription IDs (one ID per line)
 $subscriptionFile = "C:\path\to\subscriptions.txt"
@@ -9,28 +9,13 @@ $subscriptionIds = Get-Content -Path $subscriptionFile
 # Array to store results
 $results = @()
 
-# Define a timeout in seconds
-$timeoutSeconds = 10
-
-# Function to execute a block of code with a timeout
-function Execute-WithTimeout {
-    param (
-        [ScriptBlock]$CodeBlock,
-        [int]$TimeoutInSeconds
-    )
-    $job = Start-Job -ScriptBlock $CodeBlock
-    if (Wait-Job -Job $job -Timeout $TimeoutInSeconds) {
-        Receive-Job -Job $job
-    } else {
-        Write-Warning "    Operation timed out after $TimeoutInSeconds seconds."
-        Stop-Job -Job $job
-    }
-    Remove-Job -Job $job
-}
+# Define maximum retry count
+$maxRetries = 2
 
 # Loop through each subscription ID from the file
 foreach ($subscriptionId in $subscriptionIds) {
     try {
+        # Set context to the current subscription
         Set-AzContext -SubscriptionId $subscriptionId
         Write-Host "Processing Subscription: $subscriptionId" -ForegroundColor Cyan
 
@@ -39,42 +24,50 @@ foreach ($subscriptionId in $subscriptionIds) {
         foreach ($storageAccount in $storageAccounts) {
             Write-Host "  Storage Account: $($storageAccount.StorageAccountName)" -ForegroundColor Yellow
 
-            # Get Storage Account Context (required for accessing containers)
-            $storageContext = $storageAccount.Context
+            # Attempt to get the storage account context with retries
+            $retries = 0
+            $storageContext = $null
+            do {
+                try {
+                    $storageContext = $storageAccount.Context
+                } catch {
+                    $retries++
+                    Write-Host "    Failed to get storage context (Attempt $retries/$maxRetries): $($_.Exception.Message)" -ForegroundColor Red
+                }
+            } while (-not $storageContext -and $retries -lt $maxRetries)
 
-            # Get all Blob Containers in the Storage Account with timeout handling
-            $containers = Execute-WithTimeout -CodeBlock {
-                Get-AzStorageContainer -Context $storageContext
-            } -TimeoutInSeconds $timeoutSeconds
-
-            # If unable to retrieve containers, log and continue
-            if (-not $containers) {
-                Write-Host "    Unable to access containers for Storage Account: $($storageAccount.StorageAccountName)" -ForegroundColor Red
+            if (-not $storageContext) {
+                Write-Host "    Unable to access Storage Account: $($storageAccount.StorageAccountName) after $maxRetries attempts." -ForegroundColor Red
                 continue
             }
 
-            # Process each container
-            foreach ($container in $containers) {
-                Write-Host "    Checking Container: $($container.Name)" -ForegroundColor Green
+            # Get all Blob Containers in the Storage Account
+            try {
+                $containers = Get-AzStorageContainer -Context $storageContext
+                foreach ($container in $containers) {
+                    Write-Host "    Checking Container: $($container.Name)" -ForegroundColor Green
 
-                # Check if the container is public
-                $publicAccess = $container.PublicAccess
-                if ($publicAccess -eq "Blob" -or $publicAccess -eq "Container") {
-                    Write-Host "      Public Container Found: $($container.Name)" -ForegroundColor Red
+                    # Check if the container is public
+                    $publicAccess = $container.PublicAccess
+                    if ($publicAccess -eq "Blob" -or $publicAccess -eq "Container") {
+                        Write-Host "      Public Container Found: $($container.Name)" -ForegroundColor Red
 
-                    # Construct the public URL
-                    $publicUrl = "https://$($storageAccount.StorageAccountName).blob.core.windows.net/$($container.Name)"
+                        # Construct the public URL
+                        $publicUrl = "https://$($storageAccount.StorageAccountName).blob.core.windows.net/$($container.Name)"
 
-                    # Add public container details to results
-                    $results += [PSCustomObject]@{
-                        SubscriptionId   = $subscriptionId
-                        StorageAccount   = $storageAccount.StorageAccountName
-                        ResourceGroup    = $storageAccount.ResourceGroupName
-                        Container        = $container.Name
-                        PublicAccess     = $publicAccess
-                        PublicURL        = $publicUrl
+                        # Add public container details to results
+                        $results += [PSCustomObject]@{
+                            SubscriptionId   = $subscriptionId
+                            StorageAccount   = $storageAccount.StorageAccountName
+                            ResourceGroup    = $storageAccount.ResourceGroupName
+                            Container        = $container.Name
+                            PublicAccess     = $publicAccess
+                            PublicURL        = $publicUrl
+                        }
                     }
                 }
+            } catch {
+                Write-Host "    Failed to list containers for Storage Account: $($storageAccount.StorageAccountName). Error: $($_.Exception.Message)" -ForegroundColor Red
             }
         }
     } catch {
@@ -87,6 +80,7 @@ $results | Format-Table -AutoSize
 
 # Save results to a CSV file for review
 $results | Export-Csv -Path "PublicStorageAccounts.csv" -NoTypeInformation
+
 
 
 
