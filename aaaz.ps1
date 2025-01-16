@@ -1,4 +1,4 @@
-## public storage accounts 
+### public storage accounts 
 
 # Path to the text file containing the list of subscription IDs (one ID per line)
 $subscriptionFile = "C:\path\to\subscriptions.txt"
@@ -8,6 +8,25 @@ $subscriptionIds = Get-Content -Path $subscriptionFile
 
 # Array to store results
 $results = @()
+
+# Define a timeout in seconds
+$timeoutSeconds = 10
+
+# Function to execute a block of code with a timeout
+function Execute-WithTimeout {
+    param (
+        [ScriptBlock]$CodeBlock,
+        [int]$TimeoutInSeconds
+    )
+    $job = Start-Job -ScriptBlock $CodeBlock
+    if (Wait-Job -Job $job -Timeout $TimeoutInSeconds) {
+        Receive-Job -Job $job
+    } else {
+        Write-Warning "    Operation timed out after $TimeoutInSeconds seconds."
+        Stop-Job -Job $job
+    }
+    Remove-Job -Job $job
+}
 
 # Loop through each subscription ID from the file
 foreach ($subscriptionId in $subscriptionIds) {
@@ -23,18 +42,10 @@ foreach ($subscriptionId in $subscriptionIds) {
             # Get Storage Account Context (required for accessing containers)
             $storageContext = $storageAccount.Context
 
-            # Get all Blob Containers in the Storage Account with retry logic
-            $containers = $null
-            $tries = 0
-            do {
-                try {
-                    $containers = Get-AzStorageContainer -Context $storageContext
-                    $tries = 2 # Exit the loop if successful
-                } catch {
-                    $tries++
-                    Write-Warning "    Failed to get containers for Storage Account: $($storageAccount.StorageAccountName). Retrying ($tries/2)..."
-                }
-            } while (-not $containers -and $tries -lt 2)
+            # Get all Blob Containers in the Storage Account with timeout handling
+            $containers = Execute-WithTimeout -CodeBlock {
+                Get-AzStorageContainer -Context $storageContext
+            } -TimeoutInSeconds $timeoutSeconds
 
             # If unable to retrieve containers, log and continue
             if (-not $containers) {
@@ -76,6 +87,7 @@ $results | Format-Table -AutoSize
 
 # Save results to a CSV file for review
 $results | Export-Csv -Path "PublicStorageAccounts.csv" -NoTypeInformation
+
 
 
 
