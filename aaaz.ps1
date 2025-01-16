@@ -11,37 +11,63 @@ $results = @()
 
 # Loop through each subscription ID from the file
 foreach ($subscriptionId in $subscriptionIds) {
-    Set-AzContext -SubscriptionId $subscriptionId
-    Write-Host "Processing Subscription: $subscriptionId" -ForegroundColor Cyan
+    try {
+        Set-AzContext -SubscriptionId $subscriptionId
+        Write-Host "Processing Subscription: $subscriptionId" -ForegroundColor Cyan
 
-    # Get all Storage Accounts in the subscription
-    $storageAccounts = Get-AzStorageAccount
-    foreach ($storageAccount in $storageAccounts) {
-        Write-Host "  Storage Account: $($storageAccount.StorageAccountName)" -ForegroundColor Yellow
+        # Get all Storage Accounts in the subscription
+        $storageAccounts = Get-AzStorageAccount
+        foreach ($storageAccount in $storageAccounts) {
+            Write-Host "  Storage Account: $($storageAccount.StorageAccountName)" -ForegroundColor Yellow
 
-        # Get Storage Account Context (required for accessing containers)
-        $storageContext = $storageAccount.Context
+            # Get Storage Account Context (required for accessing containers)
+            $storageContext = $storageAccount.Context
 
-        # Get all Blob Containers in the Storage Account
-        $containers = Get-AzStorageContainer -Context $storageContext
-        foreach ($container in $containers) {
-            Write-Host "    Checking Container: $($container.Name)" -ForegroundColor Green
+            # Get all Blob Containers in the Storage Account with retry logic
+            $containers = $null
+            $tries = 0
+            do {
+                try {
+                    $containers = Get-AzStorageContainer -Context $storageContext
+                    $tries = 2 # Exit the loop if successful
+                } catch {
+                    $tries++
+                    Write-Warning "    Failed to get containers for Storage Account: $($storageAccount.StorageAccountName). Retrying ($tries/2)..."
+                }
+            } while (-not $containers -and $tries -lt 2)
 
-            # Check if the container is public
-            $publicAccess = $container.PublicAccess
-            if ($publicAccess -eq "Blob" -or $publicAccess -eq "Container") {
-                Write-Host "      Public Container Found: $($container.Name)" -ForegroundColor Red
+            # If unable to retrieve containers, log and continue
+            if (-not $containers) {
+                Write-Host "    Unable to access containers for Storage Account: $($storageAccount.StorageAccountName)" -ForegroundColor Red
+                continue
+            }
 
-                # Add public container details to results
-                $results += [PSCustomObject]@{
-                    SubscriptionId   = $subscriptionId
-                    StorageAccount   = $storageAccount.StorageAccountName
-                    ResourceGroup    = $storageAccount.ResourceGroupName
-                    Container        = $container.Name
-                    PublicAccess     = $publicAccess
+            # Process each container
+            foreach ($container in $containers) {
+                Write-Host "    Checking Container: $($container.Name)" -ForegroundColor Green
+
+                # Check if the container is public
+                $publicAccess = $container.PublicAccess
+                if ($publicAccess -eq "Blob" -or $publicAccess -eq "Container") {
+                    Write-Host "      Public Container Found: $($container.Name)" -ForegroundColor Red
+
+                    # Construct the public URL
+                    $publicUrl = "https://$($storageAccount.StorageAccountName).blob.core.windows.net/$($container.Name)"
+
+                    # Add public container details to results
+                    $results += [PSCustomObject]@{
+                        SubscriptionId   = $subscriptionId
+                        StorageAccount   = $storageAccount.StorageAccountName
+                        ResourceGroup    = $storageAccount.ResourceGroupName
+                        Container        = $container.Name
+                        PublicAccess     = $publicAccess
+                        PublicURL        = $publicUrl
+                    }
                 }
             }
         }
+    } catch {
+        Write-Host "Failed to process subscription: $subscriptionId. Error: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
@@ -50,6 +76,7 @@ $results | Format-Table -AutoSize
 
 # Save results to a CSV file for review
 $results | Export-Csv -Path "PublicStorageAccounts.csv" -NoTypeInformation
+
 
 
 
