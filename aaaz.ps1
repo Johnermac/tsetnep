@@ -1,3 +1,62 @@
+## public storage accounts 
+
+# Path to the text file containing the list of subscription IDs (one ID per line)
+$subscriptionFile = "C:\path\to\subscriptions.txt"
+
+# Read subscription IDs from the file
+$subscriptionIds = Get-Content -Path $subscriptionFile
+
+# Array to store results
+$results = @()
+
+# Loop through each subscription ID from the file
+foreach ($subscriptionId in $subscriptionIds) {
+    Set-AzContext -SubscriptionId $subscriptionId
+    Write-Host "Processing Subscription: $subscriptionId" -ForegroundColor Cyan
+
+    # Get all Storage Accounts in the subscription
+    $storageAccounts = Get-AzStorageAccount
+    foreach ($storageAccount in $storageAccounts) {
+        Write-Host "  Storage Account: $($storageAccount.StorageAccountName)" -ForegroundColor Yellow
+
+        # Get Storage Account Context (required for accessing containers)
+        $storageContext = $storageAccount.Context
+
+        # Get all Blob Containers in the Storage Account
+        $containers = Get-AzStorageContainer -Context $storageContext
+        foreach ($container in $containers) {
+            Write-Host "    Checking Container: $($container.Name)" -ForegroundColor Green
+
+            # Check if the container is public
+            $publicAccess = $container.PublicAccess
+            if ($publicAccess -eq "Blob" -or $publicAccess -eq "Container") {
+                Write-Host "      Public Container Found: $($container.Name)" -ForegroundColor Red
+
+                # Add public container details to results
+                $results += [PSCustomObject]@{
+                    SubscriptionId   = $subscriptionId
+                    StorageAccount   = $storageAccount.StorageAccountName
+                    ResourceGroup    = $storageAccount.ResourceGroupName
+                    Container        = $container.Name
+                    PublicAccess     = $publicAccess
+                }
+            }
+        }
+    }
+}
+
+# Output the results
+$results | Format-Table -AutoSize
+
+# Save results to a CSV file for review
+$results | Export-Csv -Path "PublicStorageAccounts.csv" -NoTypeInformation
+
+
+
+
+
+# ----------------------------------------
+
 # Output file
 $outputFile = "automation_accounts.csv"
 "SubscriptionName,AutomationAccountName,ResourceGroupName,IdentityType" | Out-File -FilePath $outputFile -Encoding utf8
